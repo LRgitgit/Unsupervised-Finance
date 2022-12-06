@@ -22,10 +22,12 @@ class Requester(object) :
     '''
     Make the requests needed and call Parsers object to process raw html and extract data from it
     '''
-    def __init__(self,  tickers, proxies, nb_threads, step_time, save_time) :
+    def __init__(self,  alpha_tickers, beta_tickers,proxies, nb_threads, step_time, save_time) :
         
         #List of ticker that the Requester must request for from kraken public endpoints
-        self.ticker = tickers
+        self.ticker = alpha_tickers
+        self.total_tickers = alpha_tickers + beta_tickers
+        print(self.total_tickers)
         
         #List of proxies usable by the Requester object
         self.proxies = proxies
@@ -38,11 +40,7 @@ class Requester(object) :
         self.hour_timer = time.time()
         self.half_day_timer = time.time()
         self.day_timer = time.time()
-        #Init the file name to the moment of class initializing
-        self.file_to_save = time.strftime("%a, %d %b %Y %H:%M:%S", gmtime()).replace(" ", "_").replace(",","").replace(":","-") +".json"
-        file = open(self.file_to_save, "w")
-        file.write("{}")
-        file.close()
+
         #Init the starting time of the 6 hours period before having to change saving file
         self.start_time = time.time()
         
@@ -103,7 +101,7 @@ class Requester(object) :
             # Start the load operations and mark each future with its URL
             self.start = time.time()
             
-            OHLC_generator = {executor.submit(self.Query_OHLC, ticker) for ticker in self.ticker}
+            OHLC_generator = {executor.submit(self.Query_OHLC, ticker) for ticker in self.total_tickers}
             Orderbook_generator = {executor.submit(self.Query_Orderbook, ticker) for ticker in self.ticker}
             Last_trades_generator = {executor.submit(self.Query_Last_Trades, ticker) for ticker in self.ticker}
             Yahoo_Queries_generator = {executor.submit(self.Query_FGI),
@@ -205,7 +203,8 @@ class Requester(object) :
     def Query_OHLC(self, ticker) :
         
         proxy = self.proxies[random.randint(0,len(self.proxies))]
-        resp = requests.get('https://api.kraken.com/0/public/OHLC?pair={0}'.format(ticker), proxy)
+        #Since argument in query allows to reduce a lot the duplicate data, too high value allows to get only the last OHLC in resp
+        resp = requests.get('https://api.kraken.com/0/public/OHLC?pair={0}&since={1}'.format(ticker, int(self.second_timer) - 20), proxy)
         self.raw_OHLC.update({ticker:json.loads(resp.text)})
         if time.time() - self.second_timer > self.step_time + 3 :
             self.proxies.pop(self.proxies.index(proxy))
@@ -225,7 +224,6 @@ class Requester(object) :
         self.raw_Last_Trades.update({ticker:json.loads(resp.text)})
         if time.time() - self.second_timer > self.step_time + 3 :
             self.proxies.pop(self.proxies.index(proxy))
-        print(resp.status_code)
             
     def Query_FGI(self) : 
         proxy = self.proxies[random.randint(0,len(self.proxies))]
@@ -250,7 +248,6 @@ class Requester(object) :
         self.raw_Indices = requests.get("https://fr.finance.yahoo.com/indices-mondiaux/", proxy, headers = self.header)
         if time.time() - self.second_timer > self.step_time + 3 :
             self.proxies.pop(self.proxies.index(proxy))
-        print(self.raw_Indices.status_code)
             
     def Query_Yahoo_HighTech(self) : 
         
@@ -432,7 +429,16 @@ def Import_proxies() :
         proxies.append(proxy)
     return proxies
 
-tickers = ["BTCUSD", "ETHUSD", "USDTUSD"]
-os.chdir("/home/luis/Bureau/Scraper")
+#Those for whom we query OHLC, Last trades and Orderbook
+alpha_tickers = ["BTCUSD", "ETHUSD", "USDTUSD"]
+
+#Those for whom we query only OHLC
+beta_tickers = ["XRPUSD", "ADAUSD", "MATICUSD", "DOTUSD", "LTCUSD", "SHIBUSD", "TRXUSD", "LUNAUSD"]
+
+#os.chdir("/home/luis/Bureau/Scraper")
 proxies = Import_proxies()
-S = Requester(tickers,proxies, 16, 15, 3600)
+S = Requester(alpha_tickers, beta_tickers,
+              proxies, 
+              nb_threads = 16,
+              step_time = 10,
+              save_time = 3600)
